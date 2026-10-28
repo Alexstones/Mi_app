@@ -38,6 +38,8 @@ class AlertaNodo {
   final String tipo; // 'temperature', 'humidity'
   final double valor;
   final String timestamp;
+  final double? umbral;
+  final int? lecturaId;
 
   AlertaNodo({
     this.id,
@@ -45,6 +47,8 @@ class AlertaNodo {
     required this.tipo,
     required this.valor,
     required this.timestamp,
+    this.umbral,
+    this.lecturaId,
   });
 
   Map<String, dynamic> toMap() {
@@ -54,6 +58,8 @@ class AlertaNodo {
       'tipo': tipo,
       'valor': valor,
       'timestamp': timestamp,
+      if (umbral != null) 'umbral': umbral,
+      if (lecturaId != null) 'lectura_id': lecturaId,
     };
   }
 
@@ -64,6 +70,8 @@ class AlertaNodo {
       tipo: map['tipo'] as String,
       valor: (map['valor'] as num).toDouble(),
       timestamp: map['timestamp'] as String,
+      umbral: (map['umbral'] as num?)?.toDouble(),
+      lecturaId: map['lectura_id'] as int?,
     );
   }
 }
@@ -75,6 +83,8 @@ class SensorReading {
   final double value;
   final String timestamp;
   final String? ubicacionNodo;
+  final String? nodoId;
+  final double? umbral;
 
   SensorReading({
     this.id,
@@ -82,6 +92,8 @@ class SensorReading {
     required this.value,
     required this.timestamp,
     this.ubicacionNodo,
+    this.nodoId,
+    this.umbral,
   });
 
   Map<String, dynamic> toMap() {
@@ -91,6 +103,8 @@ class SensorReading {
       'value': value,
       'timestamp': timestamp,
       if (ubicacionNodo != null) 'ubicacion_nodo': ubicacionNodo,
+      if (nodoId != null) 'nodo_id': nodoId,
+      if (umbral != null) 'umbral': umbral,
     };
   }
 
@@ -101,6 +115,8 @@ class SensorReading {
       value: (map['value'] as num).toDouble(),
       timestamp: map['timestamp'] as String,
       ubicacionNodo: map['ubicacion_nodo'] as String?,
+      nodoId: map['nodo_id'] as String?,
+      umbral: (map['umbral'] as num?)?.toDouble(),
     );
   }
 }
@@ -110,7 +126,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
-  // Almacenamiento en memoria para entorno Web o tests sin FFI nativo
+  // Memoria sólo para web/tests. En dispositivos nativos el fallo SQLite se propaga.
   final List<NodoIoT> _memoryNodes = [
     NodoIoT(id: 'ESP32_01', nombre: 'Sensor Invernadero', ubicacion: 'Zona Norte'),
     NodoIoT(id: 'ESP32_02', nombre: 'Sensor Almacén', ubicacion: 'Zona Central'),
@@ -136,8 +152,8 @@ class DatabaseHelper {
       _database = await _initDB('iot_local.db');
       return _database!;
     } catch (e) {
-      // Fallback si sqflite nativo no está disponible
-      return null;
+      if (kDebugMode && !kIsWeb) rethrow;
+      rethrow;
     }
   }
 
@@ -147,7 +163,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2, // Versión 2 con migración onUpgrade
+      version: 3, // Migración no destructiva para registros de hardware
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -175,6 +191,8 @@ class DatabaseHelper {
         tipo TEXT NOT NULL,
         valor REAL NOT NULL,
         timestamp TEXT NOT NULL,
+        umbral REAL,
+        lectura_id INTEGER,
         FOREIGN KEY (nodoId) REFERENCES nodos (id) ON DELETE CASCADE
       )
     ''');
@@ -186,7 +204,9 @@ class DatabaseHelper {
         sensorType TEXT NOT NULL,
         value REAL NOT NULL,
         timestamp TEXT NOT NULL,
-        ubicacion_nodo TEXT
+        ubicacion_nodo TEXT,
+        nodo_id TEXT,
+        umbral REAL
       )
     ''');
 
@@ -206,6 +226,12 @@ class DatabaseHelper {
     if (oldVersion < 2) {
       // Agrega la nueva columna sin perder los registros previos
       await db.execute('ALTER TABLE readings ADD COLUMN ubicacion_nodo TEXT;');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE readings ADD COLUMN nodo_id TEXT');
+      await db.execute('ALTER TABLE readings ADD COLUMN umbral REAL');
+      await db.execute('ALTER TABLE alertas ADD COLUMN umbral REAL');
+      await db.execute('ALTER TABLE alertas ADD COLUMN lectura_id INTEGER');
     }
   }
 
@@ -231,6 +257,8 @@ class DatabaseHelper {
         tipo: alerta.tipo,
         valor: alerta.valor,
         timestamp: alerta.timestamp,
+        umbral: alerta.umbral,
+        lecturaId: alerta.lecturaId,
       );
       _memoryAlerts.add(saved);
       return newId;
@@ -255,6 +283,95 @@ class DatabaseHelper {
     return result.map((json) => AlertaNodo.fromMap(json)).toList();
   }
 
+  Future<List<AlertaNodo>> getAllAlerts() async {
+    final db = await database;
+    if (db == null) {
+      final items = List<AlertaNodo>.from(_memoryAlerts);
+      items.sort((a, b) => (b.id ?? 0).compareTo(a.id ?? 0));
+      return items;
+    }
+    final rows = await db.query('alertas', orderBy: 'id DESC');
+    return rows.map(AlertaNodo.fromMap).toList();
+  }
+
+  /// Guarda una muestra y sus alertas en una sola transacción SQLite.
+  Future<IoTInsertSummary> saveIotTelemetry({
+    required String nodeId,
+    required String location,
+    double? temperature,
+    double? humidity,
+    required double temperatureThreshold,
+    required String timestamp,
+  }) async {
+    if (temperature == null && humidity == null) {
+      throw const FormatException('La muestra no contiene sensores.');
+    }
+    if (!temperatureThreshold.isFinite ||
+        (temperature != null && !temperature.isFinite) ||
+        (humidity != null && !humidity.isFinite)) {
+      throw const FormatException('Se requieren valores finitos.');
+    }
+    final triggered = temperature != null && temperature > temperatureThreshold;
+    final db = await database;
+    if (db == null) {
+      await insertNodo(NodoIoT(id: nodeId, nombre: nodeId, ubicacion: location));
+      var count = 0;
+      int? temperatureId;
+      if (temperature != null) {
+        temperatureId = await insertReading(SensorReading(
+          sensorType: 'temperature', value: temperature, timestamp: timestamp,
+          ubicacionNodo: location, nodoId: nodeId, umbral: temperatureThreshold,
+        ));
+        count++;
+      }
+      if (humidity != null) {
+        await insertReading(SensorReading(
+          sensorType: 'humidity', value: humidity, timestamp: timestamp,
+          ubicacionNodo: location, nodoId: nodeId,
+        ));
+        count++;
+      }
+      if (triggered) {
+        await insertAlerta(AlertaNodo(
+          nodoId: nodeId, tipo: 'temperature', valor: temperature,
+          timestamp: timestamp, umbral: temperatureThreshold,
+          lecturaId: temperatureId,
+        ));
+      }
+      return IoTInsertSummary(count, triggered ? 1 : 0);
+    }
+    return db.transaction((txn) async {
+      await txn.insert('nodos', {
+        'id': nodeId, 'nombre': nodeId, 'ubicacion': location,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      var count = 0;
+      int? temperatureId;
+      if (temperature != null) {
+        temperatureId = await txn.insert('readings', SensorReading(
+          sensorType: 'temperature', value: temperature,
+          timestamp: timestamp, ubicacionNodo: location,
+          nodoId: nodeId, umbral: temperatureThreshold,
+        ).toMap());
+        count++;
+      }
+      if (humidity != null) {
+        await txn.insert('readings', SensorReading(
+          sensorType: 'humidity', value: humidity,
+          timestamp: timestamp, ubicacionNodo: location, nodoId: nodeId,
+        ).toMap());
+        count++;
+      }
+      if (triggered) {
+        await txn.insert('alertas', AlertaNodo(
+          nodoId: nodeId, tipo: 'temperature',
+          valor: temperature, timestamp: timestamp,
+          umbral: temperatureThreshold, lecturaId: temperatureId,
+        ).toMap());
+      }
+      return IoTInsertSummary(count, triggered ? 1 : 0);
+    });
+  }
+
   // Inserción parametrizada para PREVENIR SQL Injection
   Future<int> insertReading(SensorReading reading) async {
     final db = await database;
@@ -266,6 +383,8 @@ class DatabaseHelper {
         value: reading.value,
         timestamp: reading.timestamp,
         ubicacionNodo: reading.ubicacionNodo,
+        nodoId: reading.nodoId,
+        umbral: reading.umbral,
       );
       _memoryReadings.add(saved);
       return newId;
@@ -354,3 +473,9 @@ class DatabaseHelper {
   }
 }
 
+
+class IoTInsertSummary {
+  final int readings;
+  final int alerts;
+  const IoTInsertSummary(this.readings, this.alerts);
+}

@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'csv_nodes_dialog.dart';
 import 'database_helper.dart';
+import 'esp32_monitor_panel.dart';
 
 class HistoricalAlertsScreen extends StatefulWidget {
   const HistoricalAlertsScreen({super.key});
@@ -20,7 +21,8 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() { if (mounted) setState(() {}); });
     _refreshData();
   }
 
@@ -32,7 +34,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
 
   void _refreshData() {
     setState(() {
-      _alertsFuture = DatabaseHelper.instance.getAlertasPorTipo('temperature');
+      _alertsFuture = DatabaseHelper.instance.getAllAlerts();
       if (_selectedFilter == 'all') {
         _readingsFuture = DatabaseHelper.instance.getAllReadings();
       } else {
@@ -247,7 +249,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Módulo 2: SQLite IoT (sqflite)'),
+        title: const Text('Smart-Environment: Histórico IoT'),
         backgroundColor: Colors.teal.shade50,
         actions: [
           TextButton.icon(
@@ -277,8 +279,9 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
             ),
             Tab(
               icon: Icon(Icons.warning_amber),
-              text: 'Alertas 1:N (SQLite)',
+              text: 'Alertas',
             ),
+            Tab(icon: Icon(Icons.wifi), text: 'ESP32'),
           ],
         ),
       ),
@@ -360,13 +363,14 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                       itemBuilder: (context, index) {
                         final item = readings[index];
                         final isTemp = item.sensorType == 'temperature';
+                        final isCritical = isTemp && item.value > (item.umbral ?? 35.0);
 
                         return Card(
                           elevation: 1.5,
                           margin: const EdgeInsets.only(bottom: 8),
                           shape: RoundedRectangleBorder(
                             side: BorderSide(
-                              color: isTemp ? Colors.orange.shade200 : Colors.blue.shade200,
+                              color: isCritical ? Colors.red : (isTemp ? Colors.orange.shade200 : Colors.blue.shade200),
                             ),
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -375,7 +379,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                               backgroundColor: isTemp ? Colors.orange.shade100 : Colors.blue.shade100,
                               child: Icon(
                                 isTemp ? Icons.thermostat : Icons.water_drop,
-                                color: isTemp ? Colors.orange.shade800 : Colors.blue.shade800,
+                                color: isCritical ? Colors.red : (isTemp ? Colors.orange.shade800 : Colors.blue.shade800),
                               ),
                             ),
                             title: Text(
@@ -385,7 +389,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             subtitle: Text(
-                              'Ubicación: ${item.ubicacionNodo ?? 'N/A'} | Fecha: ${item.timestamp}',
+                              'Nodo: ${item.nodoId ?? 'manual'} | Ubicación: ${item.ubicacionNodo ?? 'N/A'} | Fecha: ${item.timestamp}${isCritical ? ' | ALERTA' : ''}',
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -440,7 +444,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                 itemCount: alerts.length,
                 itemBuilder: (context, index) {
                   final item = alerts[index];
-                  final isCritical = item.valor > 35.0;
+                  final isCritical = item.valor > (item.umbral ?? 35.0);
 
                   return Card(
                     elevation: 2,
@@ -464,7 +468,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                         '${item.tipo.toUpperCase()}: ${item.valor} °C',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-                      subtitle: Text('Nodo: ${item.nodoId}  |  Fecha: ${item.timestamp}'),
+                      subtitle: Text('Nodo: ${item.nodoId} | Umbral: ${item.umbral ?? 35.0} °C | Fecha: ${item.timestamp}'),
                       trailing: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
@@ -489,18 +493,19 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
               );
             },
           ),
+          Esp32MonitorPanel(onStored: _refreshData),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: _tabController.index == 2 ? null : FloatingActionButton.extended(
         onPressed: () {
           if (_tabController.index == 0) {
             _showReadingDialog(); // Agregar lectura manual
           } else {
-            _addSimulatedAlert(); // Simular alerta ESP32
+            _showReadingDialog(); // Registro manual sin fingir hardware
           }
         },
         icon: const Icon(Icons.add),
-        label: Text(_tabController.index == 0 ? 'Nueva Lectura Manual' : 'Simular Alerta ESP32'),
+        label: Text(_tabController.index == 0 ? 'Nueva Lectura Manual' : 'Nueva Lectura Manual'),
       ),
     );
   }

@@ -1,27 +1,20 @@
-import 'dart:js_interop';
-
-import 'package:web/web.dart' as web;
+import 'dart:convert';
+import 'dart:html' as html;
 
 import 'storage_backend_stub.dart';
 
 class WebStorageBackend implements StorageBackend {
   @override
   Future<String> write(String filename, String contents) async {
-    web.window.localStorage.setItem(filename, contents);
+    html.window.localStorage[filename] = contents;
     if (filename.endsWith('.csv')) {
-      final blob = web.Blob(
-        [contents.toJS].toJS,
-        web.BlobPropertyBag(type: 'text/csv;charset=utf-8'),
-      );
-      final url = web.URL.createObjectURL(blob);
-      try {
-        (web.document.createElement('a') as web.HTMLAnchorElement)
-          ..href = url
-          ..download = filename
-          ..click();
-      } finally {
-        web.URL.revokeObjectURL(url);
-      }
+      final bytes = utf8.encode(contents);
+      final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      html.AnchorElement(href: url)
+        ..setAttribute('download', filename)
+        ..click();
+      html.Url.revokeObjectUrl(url);
       return 'Descargas (Navegador)';
     }
     return 'localStorage://$filename';
@@ -29,7 +22,7 @@ class WebStorageBackend implements StorageBackend {
 
   @override
   Future<String?> read(String filename) async {
-    return web.window.localStorage.getItem(filename);
+    return html.window.localStorage[filename];
   }
 
   @override

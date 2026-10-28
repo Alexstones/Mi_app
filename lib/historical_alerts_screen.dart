@@ -1,7 +1,7 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'csv_nodes_dialog.dart';
 import 'database_helper.dart';
-import 'esp32_monitor_panel.dart';
 
 class HistoricalAlertsScreen extends StatefulWidget {
   const HistoricalAlertsScreen({super.key});
@@ -20,8 +20,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(() { if (mounted) setState(() {}); });
+    _tabController = TabController(length: 2, vsync: this);
     _refreshData();
   }
 
@@ -33,13 +32,44 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
 
   void _refreshData() {
     setState(() {
-      _alertsFuture = DatabaseHelper.instance.getAllAlerts();
+      _alertsFuture = DatabaseHelper.instance.getAlertasPorTipo('temperature');
       if (_selectedFilter == 'all') {
         _readingsFuture = DatabaseHelper.instance.getAllReadings();
       } else {
         _readingsFuture = DatabaseHelper.instance.getReadingsByType(_selectedFilter);
       }
     });
+  }
+
+  Future<void> _addSimulatedAlert() async {
+    final random = Random();
+    final temp = 28.0 + random.nextDouble() * 15.0; // Entre 28.0 y 43.0 °C
+    final tempRounded = double.parse(temp.toStringAsFixed(1));
+    final nodeId = random.nextBool() ? 'ESP32_01' : 'ESP32_02';
+    final nowStr = DateTime.now().toIso8601String().substring(0, 19).replaceAll('T', ' ');
+
+    await DatabaseHelper.instance.insertAlerta(
+      AlertaNodo(
+        nodoId: nodeId,
+        tipo: 'temperature',
+        valor: tempRounded,
+        timestamp: nowStr,
+      ),
+    );
+
+    _refreshData();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Alerta registrada: $tempRounded °C desde $nodeId',
+          ),
+          backgroundColor: tempRounded > 35.0 ? Colors.red.shade700 : Colors.orange.shade700,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   /// Diálogo para agregar o editar manualmente una lectura (Temperatura o Humedad)
@@ -121,7 +151,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                       decoration: const InputDecoration(
                         labelText: 'Ubicación del nodo',
                         hintText: 'ej. Invernadero A, Almacén',
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
                         prefixIcon: Icon(Icons.place),
                       ),
                     ),
@@ -188,9 +218,8 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                       }
                     }
 
-                    if (!context.mounted) return;
                     Navigator.of(context).pop();
-                    if (mounted) _refreshData();
+                    _refreshData();
                   },
                 ),
               ],
@@ -218,7 +247,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Smart-Environment: Histórico IoT'),
+        title: const Text('Módulo 2: SQLite IoT (sqflite)'),
         backgroundColor: Colors.teal.shade50,
         actions: [
           TextButton.icon(
@@ -248,9 +277,8 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
             ),
             Tab(
               icon: Icon(Icons.warning_amber),
-              text: 'Alertas',
+              text: 'Alertas 1:N (SQLite)',
             ),
-            Tab(icon: Icon(Icons.wifi), text: 'ESP32'),
           ],
         ),
       ),
@@ -332,14 +360,13 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                       itemBuilder: (context, index) {
                         final item = readings[index];
                         final isTemp = item.sensorType == 'temperature';
-                        final isCritical = isTemp && item.value > (item.umbral ?? 35.0);
 
                         return Card(
                           elevation: 1.5,
                           margin: const EdgeInsets.only(bottom: 8),
                           shape: RoundedRectangleBorder(
                             side: BorderSide(
-                              color: isCritical ? Colors.red : (isTemp ? Colors.orange.shade200 : Colors.blue.shade200),
+                              color: isTemp ? Colors.orange.shade200 : Colors.blue.shade200,
                             ),
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -348,7 +375,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                               backgroundColor: isTemp ? Colors.orange.shade100 : Colors.blue.shade100,
                               child: Icon(
                                 isTemp ? Icons.thermostat : Icons.water_drop,
-                                color: isCritical ? Colors.red : (isTemp ? Colors.orange.shade800 : Colors.blue.shade800),
+                                color: isTemp ? Colors.orange.shade800 : Colors.blue.shade800,
                               ),
                             ),
                             title: Text(
@@ -358,7 +385,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             subtitle: Text(
-                              'Nodo: ${item.nodoId ?? 'manual'} | Ubicación: ${item.ubicacionNodo ?? 'N/A'} | Fecha: ${item.timestamp}${isCritical ? ' | ALERTA' : ''}',
+                              'Ubicación: ${item.ubicacionNodo ?? 'N/A'} | Fecha: ${item.timestamp}',
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -413,7 +440,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                 itemCount: alerts.length,
                 itemBuilder: (context, index) {
                   final item = alerts[index];
-                  final isCritical = item.valor > (item.umbral ?? 35.0);
+                  final isCritical = item.valor > 35.0;
 
                   return Card(
                     elevation: 2,
@@ -437,7 +464,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                         '${item.tipo.toUpperCase()}: ${item.valor} °C',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-                      subtitle: Text('Nodo: ${item.nodoId} | Umbral: ${item.umbral ?? 35.0} °C | Fecha: ${item.timestamp}'),
+                      subtitle: Text('Nodo: ${item.nodoId}  |  Fecha: ${item.timestamp}'),
                       trailing: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
@@ -462,19 +489,18 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
               );
             },
           ),
-          Esp32MonitorPanel(onStored: _refreshData),
         ],
       ),
-      floatingActionButton: _tabController.index == 2 ? null : FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           if (_tabController.index == 0) {
             _showReadingDialog(); // Agregar lectura manual
           } else {
-            _showReadingDialog(); // Registro manual sin fingir hardware
+            _addSimulatedAlert(); // Simular alerta ESP32
           }
         },
         icon: const Icon(Icons.add),
-        label: const Text('Nueva Lectura Manual'),
+        label: Text(_tabController.index == 0 ? 'Nueva Lectura Manual' : 'Simular Alerta ESP32'),
       ),
     );
   }

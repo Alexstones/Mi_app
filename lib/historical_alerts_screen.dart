@@ -121,7 +121,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                       decoration: const InputDecoration(
                         labelText: 'Ubicación del nodo',
                         hintText: 'ej. Invernadero A, Almacén',
-                        border: const OutlineInputBorder(),
+                        border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.place),
                       ),
                     ),
@@ -188,8 +188,9 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
                       }
                     }
 
+                    if (!context.mounted) return;
                     Navigator.of(context).pop();
-                    _refreshData();
+                    if (mounted) _refreshData();
                   },
                 ),
               ],

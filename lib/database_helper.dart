@@ -334,7 +334,7 @@ class DatabaseHelper {
       }
       if (triggered) {
         await insertAlerta(AlertaNodo(
-          nodoId: nodeId, tipo: 'temperature', valor: temperature!,
+          nodoId: nodeId, tipo: 'temperature', valor: temperature,
           timestamp: timestamp, umbral: temperatureThreshold,
           lecturaId: temperatureId,
         ));

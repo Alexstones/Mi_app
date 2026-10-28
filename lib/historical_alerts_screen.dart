@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'csv_nodes_dialog.dart';
 import 'database_helper.dart';
@@ -41,37 +40,6 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
         _readingsFuture = DatabaseHelper.instance.getReadingsByType(_selectedFilter);
       }
     });
-  }
-
-  Future<void> _addSimulatedAlert() async {
-    final random = Random();
-    final temp = 28.0 + random.nextDouble() * 15.0; // Entre 28.0 y 43.0 °C
-    final tempRounded = double.parse(temp.toStringAsFixed(1));
-    final nodeId = random.nextBool() ? 'ESP32_01' : 'ESP32_02';
-    final nowStr = DateTime.now().toIso8601String().substring(0, 19).replaceAll('T', ' ');
-
-    await DatabaseHelper.instance.insertAlerta(
-      AlertaNodo(
-        nodoId: nodeId,
-        tipo: 'temperature',
-        valor: tempRounded,
-        timestamp: nowStr,
-      ),
-    );
-
-    _refreshData();
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Alerta registrada: $tempRounded °C desde $nodeId',
-          ),
-          backgroundColor: tempRounded > 35.0 ? Colors.red.shade700 : Colors.orange.shade700,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
   }
 
   /// Diálogo para agregar o editar manualmente una lectura (Temperatura o Humedad)
@@ -505,7 +473,7 @@ class _HistoricalAlertsScreenState extends State<HistoricalAlertsScreen>
           }
         },
         icon: const Icon(Icons.add),
-        label: Text(_tabController.index == 0 ? 'Nueva Lectura Manual' : 'Nueva Lectura Manual'),
+        label: const Text('Nueva Lectura Manual'),
       ),
     );
   }

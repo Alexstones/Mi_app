@@ -474,7 +474,7 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
           IconButton(
             key: const Key('goto-sqlite-button'),
-            tooltip: 'Módulo 2: SQLite IoT',
+            tooltip: 'Historial Smart-Environment IoT',
             icon: const Icon(Icons.sensors),
             onPressed: () {
               Navigator.of(context).push(
@@ -520,7 +520,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                     ActionChip(
                       avatar: const Icon(Icons.sensors, color: Colors.teal, size: 18),
-                      label: const Text('Módulo 2: SQLite Relacional IoT'),
+                      label: const Text('Historial IoT y ESP32'),
                       onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
